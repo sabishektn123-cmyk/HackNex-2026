@@ -2,9 +2,11 @@
 VERITYAI Code Validator
 
 Performs static security analysis of AI-generated Python code
-before the code is allowed to execute.
+before execution.
 
-This module uses Python's AST parser instead of executing code.
+Important:
+This validator is one layer of security.
+It must always be combined with sandboxed execution.
 """
 
 import ast
@@ -14,8 +16,6 @@ from typing import List
 
 @dataclass
 class ValidationResult:
-    """Result of static code validation."""
-
     valid: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -24,12 +24,9 @@ class ValidationResult:
 class CodeValidator:
     """
     Static security validator for AI-generated Python code.
-
-    The validator analyzes Python source code using AST and blocks
-    dangerous imports, functions, and operations.
     """
 
-    # Imports that should never be allowed in generated calculation code.
+    # Imports that are never allowed.
     BLOCKED_IMPORTS = {
         "os",
         "subprocess",
@@ -45,9 +42,12 @@ class CodeValidator:
         "builtins",
         "multiprocessing",
         "threading",
+        "importlib",
+        "inspect",
     }
 
-    # Dangerous built-in functions.
+    # Functions that could execute arbitrary code,
+    # access files, inspect the runtime, or dynamically load code.
     BLOCKED_FUNCTIONS = {
         "eval",
         "exec",
@@ -55,9 +55,18 @@ class CodeValidator:
         "__import__",
         "input",
         "breakpoint",
+        "open",
+        "help",
+        "dir",
+        "globals",
+        "locals",
+        "vars",
+        "getattr",
+        "setattr",
+        "delattr",
     }
 
-    # Dangerous attribute calls.
+    # Dangerous attribute operations.
     BLOCKED_ATTRIBUTES = {
         "system",
         "popen",
@@ -67,11 +76,19 @@ class CodeValidator:
         "rmtree",
         "chmod",
         "chown",
+        "__globals__",
+        "__builtins__",
+        "__class__",
+        "__subclasses__",
+        "__bases__",
+        "__mro__",
+        "__dict__",
+        "__getattribute__",
     }
 
     def validate(self, code: str) -> ValidationResult:
         """
-        Validate Python source code without executing it.
+        Validate Python code without executing it.
         """
 
         if not isinstance(code, str):
@@ -86,6 +103,7 @@ class CodeValidator:
                 errors=["Code cannot be empty."]
             )
 
+        # Parse only. Never execute.
         try:
             tree = ast.parse(code)
         except SyntaxError as exc:
@@ -101,11 +119,11 @@ class CodeValidator:
 
         for node in ast.walk(tree):
 
-            # -------------------------------------------------
-            # IMPORT VALIDATION
-            # -------------------------------------------------
-
+            # -----------------------------------------
+            # Import validation
+            # -----------------------------------------
             if isinstance(node, ast.Import):
+
                 for alias in node.names:
                     module = alias.name.split(".")[0]
 
@@ -115,6 +133,7 @@ class CodeValidator:
                         )
 
             elif isinstance(node, ast.ImportFrom):
+
                 module = (node.module or "").split(".")[0]
 
                 if module in self.BLOCKED_IMPORTS:
@@ -122,13 +141,13 @@ class CodeValidator:
                         f"Blocked import: {module}"
                     )
 
-            # -------------------------------------------------
-            # FUNCTION VALIDATION
-            # -------------------------------------------------
-
+            # -----------------------------------------
+            # Function-call validation
+            # -----------------------------------------
             elif isinstance(node, ast.Call):
 
                 if isinstance(node.func, ast.Name):
+
                     function_name = node.func.id
 
                     if function_name in self.BLOCKED_FUNCTIONS:
@@ -137,6 +156,7 @@ class CodeValidator:
                         )
 
                 elif isinstance(node.func, ast.Attribute):
+
                     attribute_name = node.func.attr
 
                     if attribute_name in self.BLOCKED_ATTRIBUTES:
@@ -144,22 +164,16 @@ class CodeValidator:
                             f"Blocked operation: {attribute_name}"
                         )
 
-            # -------------------------------------------------
-            # DYNAMIC ATTRIBUTE ACCESS
-            # -------------------------------------------------
-
+            # -----------------------------------------
+            # Attribute validation
+            # -----------------------------------------
             elif isinstance(node, ast.Attribute):
 
-                if node.attr in {
-                    "__globals__",
-                    "__builtins__",
-                    "__class__",
-                    "__subclasses__",
-                    "__bases__",
-                    "__mro__",
-                }:
+                attribute_name = node.attr
+
+                if attribute_name in self.BLOCKED_ATTRIBUTES:
                     errors.append(
-                        f"Blocked dangerous attribute: {node.attr}"
+                        f"Blocked dangerous attribute: {attribute_name}"
                     )
 
         return ValidationResult(

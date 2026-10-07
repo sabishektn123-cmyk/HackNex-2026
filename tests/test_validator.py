@@ -79,3 +79,73 @@ def test_invalid_python_is_rejected():
     )
 
     assert result.valid is False
+def test_open_file_is_blocked():
+    validator = CodeValidator()
+
+    result = validator.validate(
+        "data = open('secret.txt').read()"
+    )
+
+    assert result.valid is False
+    assert "Blocked function: open" in result.errors
+
+
+def test_importlib_is_blocked():
+    validator = CodeValidator()
+
+    result = validator.validate(
+        "import importlib\nimportlib.import_module('os')"
+    )
+
+    assert result.valid is False
+    assert "Blocked import: importlib" in result.errors
+
+
+def test_globals_is_blocked():
+    validator = CodeValidator()
+
+    result = validator.validate(
+        "x = globals()"
+    )
+
+    assert result.valid is False
+    assert "Blocked function: globals" in result.errors
+
+
+def test_getattr_is_blocked():
+    validator = CodeValidator()
+
+    result = validator.validate(
+        "getattr(object, '__class__')"
+    )
+
+    assert result.valid is False
+    assert "Blocked function: getattr" in result.errors
+
+
+def test_dangerous_attribute_is_blocked():
+    validator = CodeValidator()
+
+    result = validator.validate(
+        "x.__dict__"
+    )
+
+    assert result.valid is False
+    assert any(
+        "__dict__" in error
+        for error in result.errors
+    )
+
+
+def test_normal_math_is_allowed():
+    validator = CodeValidator()
+
+    result = validator.validate(
+        """
+numbers = [10, 20, 30]
+average = sum(numbers) / len(numbers)
+print(average)
+"""
+    )
+
+    assert result.valid is True
