@@ -1,15 +1,14 @@
 """
-VERITYAI Execution Engine
+VERITYAI Execution Engine.
 
-Responsible for executing approved Python calculations and
-returning structured execution results.
-
-Security validation and sandbox enforcement are implemented
-in later stages of the verification pipeline.
+Coordinates validation and sandbox execution.
 """
 
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from .sandbox import Sandbox
+from .validator import CodeValidator
 
 
 @dataclass
@@ -28,37 +27,52 @@ class ExecutionResult:
 
 class Executor:
     """
-    Base execution interface for VERITYAI.
+    Main execution interface for VERITYAI.
 
-    The actual secure execution mechanism will be implemented
-    in the sandbox layer during the security stages.
+    Generated code must pass static validation before it is
+    sent to the sandbox.
     """
+
+    def __init__(self, timeout_seconds: float = 5.0):
+        self.validator = CodeValidator()
+        self.sandbox = Sandbox(
+            timeout_seconds=timeout_seconds
+        )
 
     def execute(self, code: str) -> ExecutionResult:
         """
-        Execute generated Python code.
-
-        This method is intentionally not executing arbitrary code yet.
-        Security validation and sandboxing must be completed before
-        generated AI code is allowed to run.
+        Validate and execute generated Python code.
         """
 
         if not isinstance(code, str):
             return ExecutionResult(
                 status="ERROR",
-                error="Code must be provided as a string."
+                error="Code must be provided as a string.",
             )
 
         if not code.strip():
             return ExecutionResult(
                 status="ERROR",
-                error="Code cannot be empty."
+                error="Code cannot be empty.",
             )
 
-        return ExecutionResult(
-            status="NOT_IMPLEMENTED",
-            error=(
-                "Secure execution is not enabled yet. "
-                "Validation and sandboxing must be implemented first."
+        validation = self.validator.validate(code)
+
+        if not validation.valid:
+            return ExecutionResult(
+                status="REJECTED",
+                error="Code validation failed.",
+                stderr="\n".join(validation.errors),
             )
+
+        sandbox_result = self.sandbox.run(code)
+
+        return ExecutionResult(
+            status=sandbox_result["status"],
+            stdout=sandbox_result["stdout"],
+            stderr=sandbox_result["stderr"],
+            execution_time_ms=sandbox_result[
+                "execution_time_ms"
+            ],
+            error=sandbox_result["error"],
         )
