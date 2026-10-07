@@ -1,5 +1,7 @@
 ﻿"""
 VERITYAI Verification Pipeline.
+
+Coordinates execution, abstention, and independent verification.
 """
 
 from __future__ import annotations
@@ -7,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .abstention import AbstentionEngine
 from .executor import Executor
 from .verifier import VerificationResult, Verifier
 
@@ -18,6 +21,7 @@ class PipelineResult:
     actual: Any = None
     verification: VerificationResult | None = None
     execution_error: str | None = None
+    abstention_reason: str | None = None
 
 
 class VerificationPipeline:
@@ -29,31 +33,37 @@ class VerificationPipeline:
     def __init__(self, timeout_seconds: float = 5.0):
         self.executor = Executor(timeout_seconds=timeout_seconds)
         self.verifier = Verifier()
+        self.abstention = AbstentionEngine()
 
     def verify_calculation(
         self,
         code: str,
         expected: Any,
+        conflicting: bool = False,
+        ambiguous: bool = False,
     ) -> PipelineResult:
 
         execution = self.executor.execute(code)
 
-        if execution.status != "SUCCESS":
+        # First decide whether verification is possible.
+        abstention = self.abstention.evaluate(
+            expected=expected,
+            actual=execution.result,
+            execution_status=execution.status,
+            conflicting=conflicting,
+            ambiguous=ambiguous,
+        )
+
+        if abstention.should_abstain:
             return PipelineResult(
-                status=self.EXECUTION_FAILED,
+                status=abstention.status,
                 expected=expected,
                 actual=execution.result,
                 execution_error=execution.error,
+                abstention_reason=abstention.reason,
             )
 
-        if execution.result is None:
-            return PipelineResult(
-                status=self.CANNOT_DETERMINE,
-                expected=expected,
-                actual=None,
-                execution_error="No valid VERITYAI result was produced.",
-            )
-
+        # Only verified evidence reaches the verifier.
         verification = self.verifier.verify(
             expected=expected,
             actual=execution.result,
@@ -64,4 +74,4 @@ class VerificationPipeline:
             expected=verification.expected,
             actual=verification.actual,
             verification=verification,
-        )
+        )        
