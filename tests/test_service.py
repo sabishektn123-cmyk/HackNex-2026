@@ -1,110 +1,87 @@
 from execution.service import VerificationService
 
 
-def test_service_returns_verified_response():
+def test_verified_response_contains_proof():
     service = VerificationService()
 
     response = service.verify(
-        question="What is the total?",
-        generated_code="""
-a = 100
-b = 200
-result = a + b
-print("__VERITY_RESULT__:", result)
-""",
-        claimed_result=300,
-        dataset="sales.csv",
+        question="What is 100 * 15?",
+        generated_code="print('__VERITY_RESULT__:', 100 * 15)",
+        claimed_result=1500,
+        dataset="100 * 15",
     )
 
     assert response["status"] == "VERIFIED"
-    assert response["expected"] == 300.0
-    assert response["actual"] == 300.0
+    assert response["answer"] == 1500
+
     assert response["verification"]["status"] == "VERIFIED"
 
+    assert response["confidence"]["level"] == "HIGH"
+    assert response["confidence"]["score"] == 100.0
 
-def test_service_returns_verification_failure():
+    assert response["audit"]["final_status"] == "VERIFIED"
+    assert len(response["audit"]["code_hash"]) == 64
+
+
+def test_wrong_answer_has_no_trusted_answer():
     service = VerificationService()
 
     response = service.verify(
-        question="What is the total?",
-        generated_code="""
-a = 100
-b = 200
-result = a + b
-print("__VERITY_RESULT__:", result)
-""",
-        claimed_result=500,
-        dataset="sales.csv",
+        question="What is 100 * 15?",
+        generated_code="print('__VERITY_RESULT__:', 100 * 15)",
+        claimed_result=1499,
+        dataset="100 * 15",
     )
 
     assert response["status"] == "VERIFICATION_FAILED"
-    assert response["expected"] == 500.0
-    assert response["actual"] == 300.0
+    assert response["answer"] is None
+
+    assert response["verification"]["status"] == "VERIFICATION_FAILED"
 
 
-def test_service_returns_abstention():
+def test_unsafe_code_cannot_be_verified():
     service = VerificationService()
 
     response = service.verify(
-        question="What is the total?",
-        generated_code="""
-print("I cannot calculate this")
-""",
-        claimed_result=300,
-        dataset="sales.csv",
+        question="Calculate result",
+        generated_code="import os\nprint('__VERITY_RESULT__:', 100)",
+        claimed_result=100,
+        dataset="test",
     )
 
     assert response["status"] == "CANNOT_DETERMINE"
-    assert response["abstention_reason"] is not None
+    assert response["answer"] is None
+    assert response["confidence"]["level"] in {"LOW", "MEDIUM"}
+    assert response["audit"]["final_status"] == "CANNOT_DETERMINE"
 
 
-def test_service_rejects_unsafe_code():
+def test_ambiguous_data_abstains():
     service = VerificationService()
 
     response = service.verify(
-        question="Execute command",
-        generated_code="""
-import os
-os.system("whoami")
-print("__VERITY_RESULT__:", 1)
-""",
-        claimed_result=1,
-        dataset="data.csv",
-    )
-
-    assert response["status"] == "CANNOT_DETERMINE"
-    assert response["status"] != "VERIFIED"
-
-
-def test_service_handles_conflicting_evidence():
-    service = VerificationService()
-
-    response = service.verify(
-        question="What is the total?",
-        generated_code="""
-result = 300
-print("__VERITY_RESULT__:", result)
-""",
-        claimed_result=300,
-        dataset="sales.csv",
-        conflicting=True,
-    )
-
-    assert response["status"] == "CANNOT_DETERMINE"
-
-
-def test_service_handles_ambiguous_evidence():
-    service = VerificationService()
-
-    response = service.verify(
-        question="What is the total?",
-        generated_code="""
-result = 300
-print("__VERITY_RESULT__:", result)
-""",
-        claimed_result=300,
-        dataset="sales.csv",
+        question="Calculate the value",
+        generated_code="print('__VERITY_RESULT__:', 100)",
+        claimed_result=100,
+        dataset="ambiguous dataset",
         ambiguous=True,
     )
 
     assert response["status"] == "CANNOT_DETERMINE"
+    assert response["answer"] is None
+    assert response["audit"]["abstention_reason"] is not None
+
+
+def test_conflicting_data_abstains():
+    service = VerificationService()
+
+    response = service.verify(
+        question="Calculate the value",
+        generated_code="print('__VERITY_RESULT__:', 100)",
+        claimed_result=100,
+        dataset="conflicting dataset",
+        conflicting=True,
+    )
+
+    assert response["status"] == "CANNOT_DETERMINE"
+    assert response["answer"] is None
+    assert response["audit"]["abstention_reason"] is not None
