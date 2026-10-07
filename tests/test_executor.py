@@ -34,8 +34,7 @@ def test_executor_blocks_os_import():
     executor = Executor()
 
     result = executor.execute(
-        "import os\n"
-        "result = os.system('whoami')"
+        "import os\nresult = os.system('whoami')"
     )
 
     assert result.status == "REJECTED"
@@ -46,8 +45,7 @@ def test_executor_blocks_subprocess():
     executor = Executor()
 
     result = executor.execute(
-        "import subprocess\n"
-        "subprocess.run(['whoami'])"
+        "import subprocess\nsubprocess.run(['whoami'])"
     )
 
     assert result.status == "REJECTED"
@@ -65,13 +63,52 @@ def test_executor_handles_runtime_error():
 
 
 def test_executor_handles_timeout():
-    executor = Executor(
-        timeout_seconds=1.0
-    )
+    executor = Executor(timeout_seconds=1.0)
 
     result = executor.execute(
-        "while True:\n"
-        "    pass"
+        "while True:\n    pass"
     )
 
     assert result.status == "TIMEOUT"
+
+
+def test_executor_extracts_numeric_result():
+    executor = Executor()
+
+    result = executor.execute(
+        """
+result = 100 + 200
+print("__VERITY_RESULT__:", result)
+"""
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.result == 300.0
+
+
+def test_executor_returns_none_without_result_marker():
+    executor = Executor()
+
+    result = executor.execute(
+        """
+result = 100 + 200
+print(result)
+"""
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.result is None
+
+
+def test_executor_rejects_nan_result():
+    executor = Executor()
+
+    result = executor.execute(
+        """
+result = float("nan")
+print("__VERITY_RESULT__:", result)
+"""
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.result is None

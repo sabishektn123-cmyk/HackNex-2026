@@ -1,9 +1,13 @@
 """
 VERITYAI Execution Engine.
 
-Coordinates validation and sandbox execution.
+Coordinates validation and sandbox execution and extracts
+structured numerical results from approved calculation code.
 """
 
+from __future__ import annotations
+
+import math
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -11,12 +15,11 @@ from .sandbox import Sandbox
 from .validator import CodeValidator
 
 
+RESULT_MARKER = "__VERITY_RESULT__:"
+
+
 @dataclass
 class ExecutionResult:
-    """
-    Structured result returned by the execution layer.
-    """
-
     status: str
     result: Optional[Any] = None
     stdout: str = ""
@@ -26,22 +29,13 @@ class ExecutionResult:
 
 
 class Executor:
-    """
-    Main execution interface for VERITYAI.
-
-    Generated code must pass static validation before it is
-    sent to the sandbox.
-    """
-
     def __init__(self, timeout_seconds: float = 5.0):
         self.validator = CodeValidator()
-        self.sandbox = Sandbox(
-            timeout_seconds=timeout_seconds
-        )
+        self.sandbox = Sandbox(timeout_seconds=timeout_seconds)
 
     def execute(self, code: str) -> ExecutionResult:
         """
-        Validate and execute generated Python code.
+        Validate and safely execute generated calculation code.
         """
 
         if not isinstance(code, str):
@@ -67,12 +61,48 @@ class Executor:
 
         sandbox_result = self.sandbox.run(code)
 
+        result = None
+
+        if sandbox_result["status"] == "SUCCESS":
+            result = self._extract_result(
+                sandbox_result["stdout"]
+            )
+
         return ExecutionResult(
             status=sandbox_result["status"],
+            result=result,
             stdout=sandbox_result["stdout"],
             stderr=sandbox_result["stderr"],
-            execution_time_ms=sandbox_result[
-                "execution_time_ms"
-            ],
+            execution_time_ms=sandbox_result["execution_time_ms"],
             error=sandbox_result["error"],
         )
+
+    @staticmethod
+    def _extract_result(stdout: str) -> Optional[float]:
+        """
+        Extract the machine-readable result from stdout.
+
+        Expected format:
+
+        __VERITY_RESULT__: 25000
+        """
+
+        for line in stdout.splitlines():
+            line = line.strip()
+
+            if not line.startswith(RESULT_MARKER):
+                continue
+
+            value_text = line[len(RESULT_MARKER):].strip()
+
+            try:
+                value = float(value_text)
+            except ValueError:
+                return None
+
+            if not math.isfinite(value):
+                return None
+
+            return value
+
+        return None
